@@ -23,6 +23,50 @@ import pygame
 import colorsys
 import time
 
+# Function for splitting received data into list of lists
+def split(a, n):
+    k, m = divmod(len(a), n)
+    return (a[i*k+min(i, m):(i+1)*k+min(i+1, m)] for i in range(n))
+
+# Function for setting color of cell according to received data
+def set_color(value):
+    if value <= 2:
+        value = 0
+    hue = (100 - value * 10) / 360
+    if hue < 0.1:
+        hue = 0.1
+    color = colorsys.hsv_to_rgb(hue, 1, 100)
+    return color
+
+# Function for transforming Pygame display into cv image
+def capture_frame(screen):
+    capture = pygame.surfarray.pixels3d(screen)
+    capture = capture.transpose([1, 0, 2])
+    capture_bgr = cv2.cvtColor(capture, cv2.COLOR_RGB2BGR)
+    return capture_bgr
+
+# Set up Pygame
+# Touch matrix dimensions
+row_num = 168
+col_num = 56
+
+# Width and height of single cell
+width = 5
+height = 5
+
+size = [col_num*width, row_num*width]
+pygame.init()
+screen = pygame.display.set_mode(size)
+
+# Colours
+BLACK = (0, 0, 0)
+screen.fill(BLACK)
+
+# Set title of screen
+pygame.display.set_caption("Walk visualization")
+
+# Used to manage how fast the screen updates
+clock = pygame.time.Clock()
 
 # Define and parse input arguments
 parser = argparse.ArgumentParser()
