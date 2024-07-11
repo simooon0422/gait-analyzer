@@ -22,6 +22,9 @@ import serial
 import pygame
 import colorsys
 import time
+import random
+
+from tflite_runtime.interpreter import Interpreter
 
 # Function for splitting received data into list of lists
 def split(a, n):
@@ -51,10 +54,10 @@ row_num = 168
 col_num = 56
 
 # Width and height of single cell
-width = 5
-height = 5
+cell_width = 3
+cell_height = 3
 
-size = [col_num*width, row_num*width]
+size = [col_num*cell_width, row_num*cell_height]
 pygame.init()
 screen = pygame.display.set_mode(size)
 
@@ -64,9 +67,6 @@ screen.fill(BLACK)
 
 # Set title of screen
 pygame.display.set_caption("Walk visualization")
-
-# Used to manage how fast the screen updates
-clock = pygame.time.Clock()
 
 # Define and parse input arguments
 parser = argparse.ArgumentParser()
@@ -78,9 +78,6 @@ parser.add_argument('--labels', help='Name of the labelmap file, if different th
                     default='labelmap.txt')
 parser.add_argument('--threshold', help='Minimum confidence threshold for displaying detected objects',
                     default=0.5)
-parser.add_argument('--image',
-                    help='Name of the single image to perform detection on. To run detection on multiple images, use --imagedir',
-                    default=None)
 
 args = parser.parse_args()
 
@@ -91,21 +88,8 @@ LABELMAP_NAME = args.labels
 
 min_conf_threshold = float(args.threshold)
 
-IM_NAME = args.image
-
-# Import TensorFlow libraries
-# If tflite_runtime is installed, import interpreter from tflite_runtime, else import from regular tensorflow
-pkg = importlib.util.find_spec('tflite_runtime')
-if pkg:
-    from tflite_runtime.interpreter import Interpreter
-else:
-    from tensorflow.lite.python.interpreter import Interpreter
-
 # Get path to current working directory
 CWD_PATH = os.getcwd()
-
-# Define path to image
-PATH_TO_IMAGE = os.path.join(CWD_PATH, IM_NAME)
 
 # Path to .tflite file, which contains the model that is used for object detection
 PATH_TO_CKPT = os.path.join(CWD_PATH, MODEL_NAME, GRAPH_NAME)
@@ -148,72 +132,111 @@ if 'StatefulPartitionedCall' in outname:  # This is a TF2 model
 else:  # This is a TF1 model
     boxes_idx, classes_idx, scores_idx = 0, 1, 2
 
-# Perform detection on image
-# Load image and resize to expected shape [1xHxWx3]
-image = cv2.imread(PATH_TO_IMAGE)
-image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-imH, imW, _ = image.shape
-image_resized = cv2.resize(image_rgb, (width, height))
-input_data = np.expand_dims(image_resized, axis=0)
+# Set up Serial connection
+rcv_list = []
+stm32 = serial.Serial(port='/dev/ttyACM0', baudrate=2222222, bytesize=8, parity='N', stopbits=1)
+stm32.flush()
+time.sleep(3)
+print("start")
 
-# Normalize pixel values if using a floating model (i.e. if model is non-quantized)
-if floating_model:
-    input_data = (np.float32(input_data) - input_mean) / input_std
-
-# Start time before detection
-start_time = time.time()
-
-#####DETECTION#####
-# Perform the actual detection by running the model with the image as input
-interpreter.set_tensor(input_details[0]['index'], input_data)
-interpreter.invoke()
-#####DETECTION#####
-
-# End time after detection
-end_time = time.time()
-detection_time = end_time - start_time
-print(f"Detection time for {PATH_TO_IMAGE}: {detection_time:.4f} seconds")
-
-# Retrieve detection results
-boxes = interpreter.get_tensor(output_details[boxes_idx]['index'])[
-    0]  # Bounding box coordinates of detected objects
-classes = interpreter.get_tensor(output_details[classes_idx]['index'])[0]  # Class index of detected objects
-scores = interpreter.get_tensor(output_details[scores_idx]['index'])[0]  # Confidence of detected objects
-
-detections = []
-
-# Loop over all detections and draw detection box if confidence is above minimum threshold
-for i in range(len(scores)):
-    if min_conf_threshold < scores[i] <= 1.0:
-        # Get bounding box coordinates and draw box
-        # Interpreter can return coordinates that are outside of image dimensions, need to force them to be within image using max() and min()
-        ymin = int(max(1, (boxes[i][0] * imH)))
-        xmin = int(max(1, (boxes[i][1] * imW)))
-        ymax = int(min(imH, (boxes[i][2] * imH)))
-        xmax = int(min(imW, (boxes[i][3] * imW)))
-
-        cv2.rectangle(image, (xmin, ymin), (xmax, ymax), (10, 255, 0), 2)
-
-        # Draw label
-        object_name = labels[int(classes[i])]  # Look up object name from "labels" array using class index
-        label = '%s: %d%%' % (object_name, int(scores[i] * 100))  # Example: 'person: 72%'
-        labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)  # Get font size
-        label_ymin = max(ymin, labelSize[1] + 10)  # Make sure not to draw label too close to top of window
-        cv2.rectangle(image, (xmin, label_ymin - labelSize[1] - 10),
-                      (xmin + labelSize[0], label_ymin + baseLine - 10), (255, 255, 255),
-                      cv2.FILLED)  # Draw white box to put label text in
-        cv2.putText(image, label, (xmin, label_ymin - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0),
-                    2)  # Draw label text
-
-        detections.append([object_name, scores[i], xmin, ymin, xmax, ymax])
-
-# All the results have been drawn on the image, now display the image
-cv2.imshow('Object detector', image)
-
-# Press any key to continue to next image, or press 'q' to quit
+# Infinite loop to analyze gait
 while True:
-    if cv2.waitKey(0) == ord('q'):
-        break
+    stm32.write(bytes('ok\n', 'utf-8'))
+    start_time = time.time()
+    data = stm32.readline()
+    end_time = time.time()
+    detection_time = end_time - start_time
+    print(f"Transfer time: {detection_time:.4f} seconds")
+    buff = data.decode("utf-8")
+    # buff = [0] * (row_num*col_num+2)
+
+    if len(buff) == row_num * col_num + 2:
+        for i in range(len(buff) - 2):
+            rcv_list.append(int(buff[i]))
+        # for i in range(row_num * col_num):
+        #     rcv_list.append(random.randrange(0, 9))
+
+        # print(rcv_list)
+        split_list = list(split(rcv_list, row_num))
+        rcv_list = []
+        # print(split_list)
+        # print("OK B")
+
+        for row in range(row_num):
+            for column in range(col_num):
+                color = set_color(split_list[row][column])
+                pygame.draw.rect(screen, color,
+                                 [cell_width * column, cell_height * row,
+                                  cell_width,
+                                  cell_height])
+
+        pygame.display.flip()
+        # Prepare image for detection and resize to expected shape [1xHxWx3]
+        image = capture_frame(screen)
+        imH, imW, _ = image.shape
+        image_resized = cv2.resize(image, (width, height))
+        input_data = np.expand_dims(image_resized, axis=0)
+
+        # Normalize pixel values if using a floating model (i.e. if model is non-quantized)
+        if floating_model:
+            input_data = (np.float32(input_data) - input_mean) / input_std
+
+        # Start time before detection
+        # start_time = time.time()
+
+        #####DETECTION#####
+        # Perform the actual detection by running the model with the image as input
+        interpreter.set_tensor(input_details[0]['index'], input_data)
+        interpreter.invoke()
+        #####DETECTION#####
+
+        # End time after detection
+        end_time = time.time()
+        detection_time = end_time - start_time
+        print(f"Detection time: {detection_time:.4f} seconds")
+
+        # Retrieve detection results
+        boxes = interpreter.get_tensor(output_details[boxes_idx]['index'])[
+            0]  # Bounding box coordinates of detected objects
+        classes = interpreter.get_tensor(output_details[classes_idx]['index'])[0]  # Class index of detected objects
+        scores = interpreter.get_tensor(output_details[scores_idx]['index'])[0]  # Confidence of detected objects
+
+        detections = []
+
+        # Loop over all detections and draw detection box if confidence is above minimum threshold
+        for i in range(len(scores)):
+            if min_conf_threshold < scores[i] <= 1.0:
+                # Get bounding box coordinates and draw box
+                # Interpreter can return coordinates that are outside of image dimensions, need to force them to be within image using max() and min()
+                ymin = int(max(1, (boxes[i][0] * imH)))
+                xmin = int(max(1, (boxes[i][1] * imW)))
+                ymax = int(min(imH, (boxes[i][2] * imH)))
+                xmax = int(min(imW, (boxes[i][3] * imW)))
+
+                cv2.rectangle(image, (xmin, ymin), (xmax, ymax), (10, 255, 0), 2)
+
+                # Draw label
+                object_name = labels[int(classes[i])]  # Look up object name from "labels" array using class index
+                label = '%s: %d%%' % (object_name, int(scores[i] * 100))  # Example: 'person: 72%'
+                labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)  # Get font size
+                label_ymin = max(ymin, labelSize[1] + 10)  # Make sure not to draw label too close to top of window
+                cv2.rectangle(image, (xmin, label_ymin - labelSize[1] - 10),
+                              (xmin + labelSize[0], label_ymin + baseLine - 10), (255, 255, 255),
+                              cv2.FILLED)  # Draw white box to put label text in
+                cv2.putText(image, label, (xmin, label_ymin - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0),
+                            2)  # Draw label text
+
+                detections.append([object_name, scores[i], xmin, ymin, xmax, ymax])
+
+        # All the results have been drawn on the image, now display the image
+        # cv2.imshow('object_detection', image)
+
+
+
+
+    # Press any key to continue to next image, or press 'q' to quit
+    # if cv2.waitKey(0) == ord('q'):
+    #     break
 
 # Clean up
-cv2.destroyAllWindows()
+# cv2.destroyAllWindows()
