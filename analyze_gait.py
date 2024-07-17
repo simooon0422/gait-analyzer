@@ -48,6 +48,14 @@ def capture_frame(screen):
     capture_bgr = cv2.cvtColor(capture, cv2.COLOR_RGB2BGR)
     return capture_bgr
 
+def draw_map(data, rows, cols, w, h):
+    for row in range(rows):
+        for column in range(cols):
+            color = set_color(data[row][column])
+            pygame.draw.rect(screen, color, [w * column, h * row, w, h])
+    screen.blit(pygame.transform.flip(screen, False, True), (0, 0))
+    pygame.display.flip()
+
 # Set up Pygame
 # Touch matrix dimensions
 row_num = 168
@@ -148,29 +156,15 @@ while True:
     detection_time = end_time - start_time
     print(f"Transfer time: {detection_time:.4f} seconds")
     buff = data.decode("utf-8")
-    # buff = [0] * (row_num*col_num+2)
 
-    if len(buff) == row_num * col_num + 2:
+    if len(buff) == row_num * col_num + 2: # Length of data + \n
         for i in range(len(buff) - 2):
             rcv_list.append(int(buff[i]))
-        # for i in range(row_num * col_num):
-        #     rcv_list.append(random.randrange(0, 9))
 
-        # print(rcv_list)
         split_list = list(split(rcv_list, row_num))
         rcv_list = []
-        # print(split_list)
-        # print("OK B")
+        draw_map(split_list, row_num, col_num, cell_width, cell_height)
 
-        for row in range(row_num):
-            for column in range(col_num):
-                color = set_color(split_list[row][column])
-                pygame.draw.rect(screen, color,
-                                 [cell_width * column, cell_height * row,
-                                  cell_width,
-                                  cell_height])
-
-        pygame.display.flip()
         # Prepare image for detection and resize to expected shape [1xHxWx3]
         image = capture_frame(screen)
         imH, imW, _ = image.shape
@@ -227,16 +221,25 @@ while True:
                             2)  # Draw label text
 
                 detections.append([object_name, scores[i], xmin, ymin, xmax, ymax])
+                for detection in detections:
+                    object_name, score, xmin, ymin, xmax, ymax = detection
+                    center_x = (xmin + xmax) // 2
+                    center_y = (ymin + ymax) // 2
+                    print(
+                        f"Object: {object_name}, Confidence: {score:.2f}, Center: ({center_x}, {center_y})")
 
         # All the results have been drawn on the image, now display the image
-        # cv2.imshow('object_detection', image)
+        cv2.imshow('object_detection', image)
 
 
 
 
-    # Press any key to continue to next image, or press 'q' to quit
-    # if cv2.waitKey(0) == ord('q'):
-    #     break
+    # CV window
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        cv2.destroyAllWindows()
+        break
 
-# Clean up
-# cv2.destroyAllWindows()
+    # PYGAME window
+    for event in pygame.event.get():  # User did something
+        if event.type == pygame.QUIT:
+            pygame.quit()

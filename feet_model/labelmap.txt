@@ -1,2 +1,2 @@
-right_foot
-left_foot
+right
+left
