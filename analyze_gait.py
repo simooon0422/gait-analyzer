@@ -19,9 +19,10 @@ import glob
 import importlib.util
 
 import serial
-import pygame
 import colorsys
 import time
+import board
+import neopixel
 import random
 
 from tflite_runtime.interpreter import Interpreter
@@ -41,22 +42,17 @@ def set_color(value):
     color = colorsys.hsv_to_rgb(hue, 1, 100)
     return color
 
-# Function for transforming Pygame display into cv image
-def capture_frame(screen):
-    capture = pygame.surfarray.pixels3d(screen)
-    capture = capture.transpose([1, 0, 2])
-    capture_bgr = cv2.cvtColor(capture, cv2.COLOR_RGB2BGR)
-    return capture_bgr
-
-def draw_map(data, rows, cols, w, h):
+# Function for creating an image from received data
+def create_pressure_map(pressure_values, rows, cols, w, h):
+    pressure_map = np.zeros((rows * h, cols * w, 3), dtype=np.uint8)
     for row in range(rows):
-        for column in range(cols):
-            color = set_color(data[row][column])
-            pygame.draw.rect(screen, color, [w * column, h * row, w, h])
-    screen.blit(pygame.transform.flip(screen, False, True), (0, 0))
-    pygame.display.flip()
+        for col in range(cols):
+            color = set_color(pressure_values[row][col])
+            cv2.rectangle(pressure_map, (col * w, row * h), (col * w + w, row * h + h), color, -1)
+    pressure_map = cv2.flip(pressure_map, 0)
+    pressure_map = cv2.cvtColor(pressure_map, cv2.COLOR_BGR2RGB)
+    return pressure_map
 
-# Set up Pygame
 # Touch matrix dimensions
 row_num = 168
 col_num = 56
@@ -65,16 +61,8 @@ col_num = 56
 cell_width = 3
 cell_height = 3
 
-size = [col_num*cell_width, row_num*cell_height]
-pygame.init()
-screen = pygame.display.set_mode(size)
-
-# Colours
-BLACK = (0, 0, 0)
-screen.fill(BLACK)
-
-# Set title of screen
-pygame.display.set_caption("Walk visualization")
+# Number of LEDs in strip
+led_num = 10
 
 # Define and parse input arguments
 parser = argparse.ArgumentParser()
@@ -140,6 +128,9 @@ if 'StatefulPartitionedCall' in outname:  # This is a TF2 model
 else:  # This is a TF1 model
     boxes_idx, classes_idx, scores_idx = 0, 1, 2
 
+# Create NeoPixel object for LED strip
+led_strip = neopixel.NeoPixel(board.D18, led_num)
+
 # Set up Serial connection
 rcv_list = []
 stm32 = serial.Serial(port='/dev/ttyACM0', baudrate=2222222, bytesize=8, parity='N', stopbits=1)
@@ -163,10 +154,9 @@ while True:
 
         split_list = list(split(rcv_list, row_num))
         rcv_list = []
-        draw_map(split_list, row_num, col_num, cell_width, cell_height)
-
+        # Create an image from the data
+        image = create_pressure_map(split_list, row_num, col_num, cell_width, cell_height)
         # Prepare image for detection and resize to expected shape [1xHxWx3]
-        image = capture_frame(screen)
         imH, imW, _ = image.shape
         image_resized = cv2.resize(image, (width, height))
         input_data = np.expand_dims(image_resized, axis=0)
@@ -227,19 +217,18 @@ while True:
                     center_y = (ymin + ymax) // 2
                     print(
                         f"Object: {object_name}, Confidence: {score:.2f}, Center: ({center_x}, {center_y})")
+                    print(len(detections))
 
         # All the results have been drawn on the image, now display the image
         cv2.imshow('object_detection', image)
-
-
-
+        # if len(detections) > 0:
+        #     for led in range(led_num):
+        #         led_strip[led] = (0, 10, 0)
+        # else:
+        #     for led in range(led_num):
+        #         led_strip[led] = (0, 0, 0)
 
     # CV window
     if cv2.waitKey(1) & 0xFF == ord('q'):
         cv2.destroyAllWindows()
         break
-
-    # PYGAME window
-    for event in pygame.event.get():  # User did something
-        if event.type == pygame.QUIT:
-            pygame.quit()
