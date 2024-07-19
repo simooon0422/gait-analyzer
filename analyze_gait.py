@@ -54,39 +54,40 @@ def create_pressure_map(pressure_values, rows, cols, w, h):
     pressure_map = cv2.cvtColor(pressure_map, cv2.COLOR_BGR2RGB)
     return pressure_map
 
-def update_leds(detections):
-    if len(detections) > 0:
-        for led in range(led_num):
-            led_strip[led] = (0, 10, 0)
-    else:
-        for led in range(led_num):
-            led_strip[led] = (0, 0, 0)
+def led_turn_on():
+    for led in range(led_num):
+        led_strip[led] = (0, 10, 0)
     led_strip.show()
+
+def led_turn_off():
+    for led in range(led_num):
+        led_strip[led] = (0, 0, 0)
+    led_strip.show()
+
+def led_update(detections):
+    if len(detections) > 0:
+        led_turn_on()
+    else:
+        led_turn_off()
 
 def led_thread_function():
     while not stop_threads:
-        update_leds(current_detections)
+        led_update(current_detections)
         time.sleep(0.1)  # Adjust the delay as necessary
+    led_turn_off()
 
-# Touch matrix dimensions
-row_num = 168
-col_num = 56
 
-# Width and height of single cell
-cell_width = 3
-cell_height = 3
-
-# Create NeoPixel object for LED strip
-led_num = 100
-led_strip = neopixel.NeoPixel(board.D18, led_num, auto_write=False)
-
-# Global variable to hold current detections
-current_detections = []
-stop_threads = False
-
-# Start LED update thread
-led_thread = threading.Thread(target=led_thread_function)
-led_thread.start()
+def read_uart_data(ser):
+    ser.write(bytes('ok\n', 'utf-8'))
+    s_time = time.time()
+    data = ser.readline()
+    e_time = time.time()
+    transfer_time = e_time - s_time
+    print(f"Transfer time: {transfer_time:.4f} seconds")
+    buff = data.decode("utf-8")
+    print(len(buff))
+    int_buff = [int(buff[i]) for i in range(len(buff) - 2)]
+    return int_buff
 
 # Define and parse input arguments
 parser = argparse.ArgumentParser()
@@ -152,8 +153,27 @@ if 'StatefulPartitionedCall' in outname:  # This is a TF2 model
 else:  # This is a TF1 model
     boxes_idx, classes_idx, scores_idx = 0, 1, 2
 
+# Touch matrix dimensions
+row_num = 168
+col_num = 56
+
+# Width and height of single cell
+cell_width = 3
+cell_height = 3
+
+# Create NeoPixel object for LED strip
+led_num = 100
+led_strip = neopixel.NeoPixel(board.D18, led_num, auto_write=False)
+
+# Global variable to hold current detections
+current_detections = []
+stop_threads = False
+
+# Create and start LED thread
+led_thread = threading.Thread(target=led_thread_function)
+led_thread.start()
+
 # Set up Serial connection
-rcv_list = []
 stm32 = serial.Serial(port='/dev/ttyACM0', baudrate=1152000, bytesize=8, parity='N', stopbits=1, timeout=1)
 stm32.flush()
 time.sleep(3)
@@ -162,19 +182,9 @@ print("start")
 # Infinite loop to analyze gait
 while True:
     try:
-        stm32.write(bytes('ok\n', 'utf-8'))
         start_time = time.time()
-        data = stm32.readline()
-        end_time = time.time()
-        detection_time = end_time - start_time
-        print(f"Transfer time: {detection_time:.4f} seconds")
-        buff = data.decode("utf-8")
-        print(len(buff))
-
-        if len(buff) == row_num * col_num + 2: # Length of data + \n
-            for i in range(len(buff) - 2):
-                rcv_list.append(int(buff[i]))
-
+        rcv_list = read_uart_data(stm32)
+        if len(rcv_list) == row_num * col_num:
             split_list = list(split(rcv_list, row_num))
             rcv_list = []
             # Create an image from the data
@@ -188,19 +198,11 @@ while True:
             if floating_model:
                 input_data = (np.float32(input_data) - input_mean) / input_std
 
-            # Start time before detection
-            # start_time = time.time()
-
             #####DETECTION#####
             # Perform the actual detection by running the model with the image as input
             interpreter.set_tensor(input_details[0]['index'], input_data)
             interpreter.invoke()
             #####DETECTION#####
-
-            # End time after detection
-            end_time = time.time()
-            detection_time = end_time - start_time
-            print(f"Detection time: {detection_time:.4f} seconds")
 
             # Retrieve detection results
             boxes = interpreter.get_tensor(output_details[boxes_idx]['index'])[
@@ -244,13 +246,19 @@ while True:
 
             current_detections = detections
 
+            # End time after detection
+            end_time = time.time()
+            detection_time = end_time - start_time
+            print(f"Detection time: {detection_time:.4f} seconds")
+
             # All the results have been drawn on the image, now display the image
             # cv2.imshow('object_detection', image)
 
-    except Exception as e:
-        print(f"Error: {e}")
+    except KeyboardInterrupt:
+        print("Program terminated")
         stop_threads = True
         led_thread.join()
+        sys.exit()
 
     # CV window
     # if cv2.waitKey(1) & 0xFF == ord('q'):
