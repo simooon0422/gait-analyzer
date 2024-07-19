@@ -54,29 +54,33 @@ def create_pressure_map(pressure_values, rows, cols, w, h):
     pressure_map = cv2.cvtColor(pressure_map, cv2.COLOR_BGR2RGB)
     return pressure_map
 
+# Function for turning LED strip on
 def led_turn_on():
     for led in range(led_num):
         led_strip[led] = (0, 10, 0)
     led_strip.show()
 
+# Function for turning LED strip off
 def led_turn_off():
     for led in range(led_num):
         led_strip[led] = (0, 0, 0)
     led_strip.show()
 
+# Function for updating LED strip
 def led_update(detections):
     if len(detections) > 0:
         led_turn_on()
     else:
         led_turn_off()
 
+# Function for LED strip thread
 def led_thread_function():
     while not stop_threads:
         led_update(current_detections)
         time.sleep(0.1)  # Adjust the delay as necessary
     led_turn_off()
 
-
+# Function for reading data from serial port
 def read_uart_data(ser):
     ser.write(bytes('ok\n', 'utf-8'))
     s_time = time.time()
@@ -89,6 +93,46 @@ def read_uart_data(ser):
     int_buff = [int(buff[i]) for i in range(len(buff) - 2)]
     return int_buff
 
+# Function for returning detection information
+def get_detections_info(img, f_boxes, f_classes, f_scores):
+    detections = []
+    imH, imW, _ = img.shape
+    # Loop over all detections and get its name and position
+    for i in range(len(f_scores)):
+        if min_conf_threshold < f_scores[i] <= 1.0:
+            ymin = int(max(1, (f_boxes[i][0] * imH)))
+            xmin = int(max(1, (f_boxes[i][1] * imW)))
+            ymax = int(min(imH, (f_boxes[i][2] * imH)))
+            xmax = int(min(imW, (f_boxes[i][3] * imW)))
+            obj_name = labels[int(f_classes[i])]
+            detections.append([obj_name, f_scores[i], xmin, ymin, xmax, ymax])
+
+            # If displaying image is turned on, draw rectangle and label
+            if display:
+                # Draw rectangle around detected object
+                cv2.rectangle(image, (xmin, ymin), (xmax, ymax), (10, 255, 0), 2)
+
+                # Draw label
+                label = '%s: %d%%' % (obj_name, int(scores[i] * 100))  # Example: 'person: 72%'
+                labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)  # Get font size
+                label_ymin = max(ymin, labelSize[1] + 10)  # Make sure not to draw label too close to top of window
+                cv2.rectangle(image, (xmin, label_ymin - labelSize[1] - 10),
+                              (xmin + labelSize[0], label_ymin + baseLine - 10), (255, 255, 255),
+                              cv2.FILLED)  # Draw white box to put label text in
+                cv2.putText(image, label, (xmin, label_ymin - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)  # Draw label text
+
+    return detections
+
+# Function for getting centers of detected objects
+def get_object_center(detections):
+    for detection in detections:
+        object_name, score, xmin, ymin, xmax, ymax = detection
+        center_x = (xmin + xmax) // 2
+        center_y = (ymin + ymax) // 2
+        print(f"Object: {object_name}, Confidence: {score:.2f}, Center: ({center_x}, {center_y})")
+        print(len(detections))
+
+
 # Define and parse input arguments
 parser = argparse.ArgumentParser()
 parser.add_argument('--modeldir', help='Folder the .tflite file is located in',
@@ -99,6 +143,7 @@ parser.add_argument('--labels', help='Name of the labelmap file, if different th
                     default='labelmap.txt')
 parser.add_argument('--threshold', help='Minimum confidence threshold for displaying detected objects',
                     default=0.5)
+parser.add_argument('--display', help='Display pressure map in cv2 window on the screen', default=False)
 
 args = parser.parse_args()
 
@@ -108,6 +153,7 @@ GRAPH_NAME = args.graph
 LABELMAP_NAME = args.labels
 
 min_conf_threshold = float(args.threshold)
+display = args.display
 
 # Get path to current working directory
 CWD_PATH = os.getcwd()
@@ -184,13 +230,16 @@ while True:
     try:
         start_time = time.time()
         rcv_list = read_uart_data(stm32)
+
         if len(rcv_list) == row_num * col_num:
             split_list = list(split(rcv_list, row_num))
             rcv_list = []
+
             # Create an image from the data
             image = create_pressure_map(split_list, row_num, col_num, cell_width, cell_height)
+
             # Prepare image for detection and resize to expected shape [1xHxWx3]
-            imH, imW, _ = image.shape
+            # imH, imW, _ = image.shape
             image_resized = cv2.resize(image, (width, height))
             input_data = np.expand_dims(image_resized, axis=0)
 
@@ -205,62 +254,30 @@ while True:
             #####DETECTION#####
 
             # Retrieve detection results
-            boxes = interpreter.get_tensor(output_details[boxes_idx]['index'])[
-                0]  # Bounding box coordinates of detected objects
+            boxes = interpreter.get_tensor(output_details[boxes_idx]['index'])[0]  # Bounding box coordinates of detected objects
             classes = interpreter.get_tensor(output_details[classes_idx]['index'])[0]  # Class index of detected objects
             scores = interpreter.get_tensor(output_details[scores_idx]['index'])[0]  # Confidence of detected objects
 
-            detections = []
-
-            # Loop over all detections and draw detection box if confidence is above minimum threshold
-            for i in range(len(scores)):
-                if min_conf_threshold < scores[i] <= 1.0:
-                    # Get bounding box coordinates and draw box
-                    # Interpreter can return coordinates that are outside of image dimensions, need to force them to be within image using max() and min()
-                    ymin = int(max(1, (boxes[i][0] * imH)))
-                    xmin = int(max(1, (boxes[i][1] * imW)))
-                    ymax = int(min(imH, (boxes[i][2] * imH)))
-                    xmax = int(min(imW, (boxes[i][3] * imW)))
-
-                    cv2.rectangle(image, (xmin, ymin), (xmax, ymax), (10, 255, 0), 2)
-
-                    # Draw label
-                    object_name = labels[int(classes[i])]  # Look up object name from "labels" array using class index
-                    label = '%s: %d%%' % (object_name, int(scores[i] * 100))  # Example: 'person: 72%'
-                    labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)  # Get font size
-                    label_ymin = max(ymin, labelSize[1] + 10)  # Make sure not to draw label too close to top of window
-                    cv2.rectangle(image, (xmin, label_ymin - labelSize[1] - 10),
-                                  (xmin + labelSize[0], label_ymin + baseLine - 10), (255, 255, 255),
-                                  cv2.FILLED)  # Draw white box to put label text in
-                    cv2.putText(image, label, (xmin, label_ymin - 7), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0),
-                                2)  # Draw label text
-
-                    detections.append([object_name, scores[i], xmin, ymin, xmax, ymax])
-                    for detection in detections:
-                        object_name, score, xmin, ymin, xmax, ymax = detection
-                        center_x = (xmin + xmax) // 2
-                        center_y = (ymin + ymax) // 2
-                        print(
-                            f"Object: {object_name}, Confidence: {score:.2f}, Center: ({center_x}, {center_y})")
-                        print(len(detections))
-
-            current_detections = detections
+            # Get detection info
+            current_detections = get_detections_info(image, boxes, classes, scores)
+            get_object_center(current_detections)
 
             # End time after detection
             end_time = time.time()
             detection_time = end_time - start_time
             print(f"Detection time: {detection_time:.4f} seconds")
 
-            # All the results have been drawn on the image, now display the image
-            # cv2.imshow('object_detection', image)
+            # CV window
+            if display:
+                cv2.imshow('object_detection', image)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    cv2.destroyAllWindows()
+                    break
 
     except KeyboardInterrupt:
+        if display:
+            cv2.destroyAllWindows()
         print("Program terminated")
         stop_threads = True
         led_thread.join()
         sys.exit()
-
-    # CV window
-    # if cv2.waitKey(1) & 0xFF == ord('q'):
-    #     cv2.destroyAllWindows()
-    #     break
