@@ -25,6 +25,7 @@ import board
 import neopixel
 import random
 import threading
+import RPi.GPIO as GPIO
 
 from tflite_runtime.interpreter import Interpreter
 
@@ -76,12 +77,33 @@ def led_update(detections):
     else:
         led_turn_off()
 
+# Set buzzer volume 0 - 100 %
+def set_volume(duty_cycle):
+    if duty_cycle > 100:
+        duty_cycle = 100
+    elif duty_cycle < 0:
+        duty_cycle = 0
+    buzzer_pwm.ChangeDutyCycle(duty_cycle)
+
+# Function for generating sound if new step is detected
+def buzzer_update(centers):
+    global previous_centers_y
+    if len(centers) > 0:
+        for center in centers:
+            if not any(previous_center - 10 <= center <= previous_center + 10 for previous_center in previous_centers_y):
+                set_volume(20)
+                time.sleep(0.2)
+                set_volume(0)
+    previous_centers_y = centers
+
 # Function for LED strip thread
-def led_thread_function():
+def gratification_thread_function():
     while not stop_threads:
         led_update(current_detections)
+        buzzer_update(centers_y)
         time.sleep(0.1)  # Adjust the delay as necessary
     led_turn_off()
+    set_volume(0)
 
 # Function for reading data from serial port
 def read_uart_data(ser):
@@ -137,27 +159,25 @@ def print_objects_centers(detections):
 
 # Function for getting y coordinates of detected objects' centers
 def get_centers_y(detections):
-    centers_y = []
+    cs_y = []
     for detection in detections:
         object_name, score, xmin, ymin, xmax, ymax = detection
-        center_y = (ymin + ymax) // 2
-        centers_y.append(center_y)
-    return centers_y
+        c_y = (ymin + ymax) // 2
+        cs_y.append(c_y)
+    return cs_y
 
 # Function for mapping values
 def map_value(x, in_min, in_max, out_min, out_max):
   return (x - in_min) * (out_max - out_min) // (in_max - in_min) + out_min
 
 # Function for choosing LEDs to light up
-def set_led_values(n, detections, half_length):
+def set_led_values(n, half_length, centers):
     led_vals = [0] * n
-    centers = get_centers_y(detections)
     for center in centers:
         center_led = abs(led_num - map_value(center, 0, row_num*cell_height, 0, led_num))
         for i in range(center_led - half_length, center_led + half_length):
-            if 0 < i < row_num*cell_height:
+            if 0 < i < led_num:
                 led_vals[i] = 1
-    print(led_vals[:20])
     return led_vals
 
 
@@ -243,13 +263,22 @@ led_values = [0] * led_num
 led_to_light_half = 8
 led_strip = neopixel.NeoPixel(board.D18, led_num, auto_write=False)
 
-# Global variable to hold current detections
+# Set up buzzer
+buzzer_pin = 23
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(buzzer_pin, GPIO.OUT)
+buzzer_pwm = GPIO.PWM(buzzer_pin, 1000)  # 1000 Hz frequency
+buzzer_pwm.start(0)  # Start PWM with 0% duty cycle
+
+# Global variables to hold current detections and y coordinate of detections
 current_detections = []
+centers_y = []
+previous_centers_y = []
 stop_threads = False
 
-# Create and start LED thread
-led_thread = threading.Thread(target=led_thread_function)
-led_thread.start()
+# Create and start gratification thread
+gratification_thread = threading.Thread(target=gratification_thread_function)
+gratification_thread.start()
 
 # Set up Serial connection
 stm32 = serial.Serial(port='/dev/ttyACM0', baudrate=1152000, bytesize=8, parity='N', stopbits=1, timeout=1)
@@ -261,17 +290,16 @@ print("start")
 while True:
     try:
         start_time = time.time()
+        # Read data from serial port
         rcv_list = read_uart_data(stm32)
 
         if len(rcv_list) == row_num * col_num:
             split_list = list(split(rcv_list, row_num))
-            rcv_list = []
 
             # Create an image from the data
             image = create_pressure_map(split_list, row_num, col_num, cell_width, cell_height)
 
             # Prepare image for detection and resize to expected shape [1xHxWx3]
-            # imH, imW, _ = image.shape
             image_resized = cv2.resize(image, (width, height))
             input_data = np.expand_dims(image_resized, axis=0)
 
@@ -293,7 +321,8 @@ while True:
             # Get detection info
             current_detections = get_detections_info(image, boxes, classes, scores)
             print_objects_centers(current_detections)
-            led_values = set_led_values(led_num, current_detections, led_to_light_half)
+            centers_y = get_centers_y(current_detections)
+            led_values = set_led_values(led_num, led_to_light_half, centers_y)
 
             # End time after detection
             end_time = time.time()
@@ -312,5 +341,7 @@ while True:
             cv2.destroyAllWindows()
         print("Program terminated")
         stop_threads = True
-        led_thread.join()
+        gratification_thread.join()
+        buzzer_pwm.stop()
+        GPIO.cleanup()
         sys.exit()
