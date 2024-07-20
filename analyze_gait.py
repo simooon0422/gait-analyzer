@@ -57,7 +57,10 @@ def create_pressure_map(pressure_values, rows, cols, w, h):
 # Function for turning LED strip on
 def led_turn_on():
     for led in range(led_num):
-        led_strip[led] = (0, 10, 0)
+        if led_values[led] == 1:
+            led_strip[led] = (0, 10, 0)
+        else:
+            led_strip[led] = (0, 0, 0)
     led_strip.show()
 
 # Function for turning LED strip off
@@ -123,14 +126,41 @@ def get_detections_info(img, f_boxes, f_classes, f_scores):
 
     return detections
 
-# Function for getting centers of detected objects
-def get_object_center(detections):
+# Function for printing centers of detected objects
+def print_objects_centers(detections):
     for detection in detections:
         object_name, score, xmin, ymin, xmax, ymax = detection
         center_x = (xmin + xmax) // 2
         center_y = (ymin + ymax) // 2
         print(f"Object: {object_name}, Confidence: {score:.2f}, Center: ({center_x}, {center_y})")
         print(len(detections))
+
+# Function for getting y coordinates of detected objects' centers
+def get_centers_y(detections):
+    centers_y = []
+    for detection in detections:
+        object_name, score, xmin, ymin, xmax, ymax = detection
+        center_y = (ymin + ymax) // 2
+        centers_y.append(center_y)
+    return centers_y
+
+# Function for mapping values
+def map_value(x, in_min, in_max, out_min, out_max):
+  return (x - in_min) * (out_max - out_min) // (in_max - in_min) + out_min
+
+# Function for choosing LEDs to light up
+def set_led_values(n, detections, half_length):
+    led_vals = [0] * n
+    centers = get_centers_y(detections)
+    for center in centers:
+        center_led = abs(led_num - map_value(center, 0, row_num*cell_height, 0, led_num))
+        for i in range(center_led - half_length, center_led + half_length):
+            if 0 < i < row_num*cell_height:
+                led_vals[i] = 1
+    print(led_vals[:20])
+    return led_vals
+
+
 
 
 # Define and parse input arguments
@@ -209,6 +239,8 @@ cell_height = 3
 
 # Create NeoPixel object for LED strip
 led_num = 100
+led_values = [0] * led_num
+led_to_light_half = 8
 led_strip = neopixel.NeoPixel(board.D18, led_num, auto_write=False)
 
 # Global variable to hold current detections
@@ -260,7 +292,8 @@ while True:
 
             # Get detection info
             current_detections = get_detections_info(image, boxes, classes, scores)
-            get_object_center(current_detections)
+            print_objects_centers(current_detections)
+            led_values = set_led_values(led_num, current_detections, led_to_light_half)
 
             # End time after detection
             end_time = time.time()
