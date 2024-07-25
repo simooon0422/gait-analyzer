@@ -22,7 +22,7 @@ import serial
 import colorsys
 import time
 import board
-import neopixel
+import neopixel_spi as neopixel
 import random
 import threading
 import RPi.GPIO as GPIO
@@ -105,7 +105,7 @@ def gratification_thread_function(e):
         # if gratification_update:
         e.wait()
         led_update(current_detections)
-        buzzer_update(centers_y)
+        # buzzer_update(centers_y)
         e.clear()
             # gratification_update = False
             # print(f"LED: {led_brightness}, Buzzer: {buzzer_volume}")
@@ -267,15 +267,15 @@ led_num = 100
 led_values = [0] * led_num
 led_to_light_half = 8
 led_brightness = 0
-led_strip = neopixel.NeoPixel(board.D18, led_num, auto_write=False)
+led_strip = neopixel.NeoPixel_SPI(board.SPI(), led_num, auto_write=False)
 
-# Set up buzzer
-buzzer_pin = 23
-buzzer_volume = 0
-GPIO.setmode(GPIO.BCM)
-GPIO.setup(buzzer_pin, GPIO.OUT)
-buzzer_pwm = GPIO.PWM(buzzer_pin, 1000)  # 1000 Hz frequency
-buzzer_pwm.start(0)  # Start PWM with 0% duty cycle
+# # Set up buzzer
+# buzzer_pin = 23
+# buzzer_volume = 0
+# GPIO.setmode(GPIO.BCM)
+# GPIO.setup(buzzer_pin, GPIO.OUT)
+# buzzer_pwm = GPIO.PWM(buzzer_pin, 1000)  # 1000 Hz frequency
+# buzzer_pwm.start(0)  # Start PWM with 0% duty cycle
 
 # Global variables to hold current detections and y coordinate of detections
 current_detections = []
