@@ -56,10 +56,12 @@ def create_pressure_map(pressure_values, rows, cols, w, h):
     return pressure_map
 
 # Function for turning LED strip on
-def led_turn_on():
+def led_turn_on(brightness):
     for led in range(led_num):
         if led_values[led] == 1:
-            led_strip[led] = (0, 10, 0)
+            led_strip[led] = (0, brightness*2, 0)
+            # led_strip[led] = (0, 10, 0)
+            # print(f"bri: {brightness}")
         else:
             led_strip[led] = (0, 0, 0)
     led_strip.show()
@@ -73,7 +75,7 @@ def led_turn_off():
 # Function for updating LED strip
 def led_update(detections):
     if len(detections) > 0:
-        led_turn_on()
+        led_turn_on(led_brightness)
     else:
         led_turn_off()
 
@@ -91,17 +93,23 @@ def buzzer_update(centers):
     if len(centers) > 0:
         for center in centers:
             if not any(previous_center - 10 <= center <= previous_center + 10 for previous_center in previous_centers_y):
-                set_volume(20)
+                set_volume(buzzer_volume*20)
                 time.sleep(0.2)
                 set_volume(0)
     previous_centers_y = centers
 
 # Function for LED strip thread
-def gratification_thread_function():
+def gratification_thread_function(e):
+    # global gratification_update
     while not stop_threads:
+        # if gratification_update:
+        e.wait()
         led_update(current_detections)
         buzzer_update(centers_y)
-        time.sleep(0.1)  # Adjust the delay as necessary
+        e.clear()
+            # gratification_update = False
+            # print(f"LED: {led_brightness}, Buzzer: {buzzer_volume}")
+        # time.sleep(0.1)  # Adjust the delay as necessary
     led_turn_off()
     set_volume(0)
 
@@ -115,7 +123,7 @@ def read_uart_data(ser):
     print(f"Transfer time: {transfer_time:.4f} seconds")
     buff = data.decode("utf-8")
     print(len(buff))
-    int_buff = [int(buff[i]) for i in range(len(buff) - 2)]
+    int_buff = [int(buff[i]) for i in range(len(buff) - 2)] # convert received characters to int except for \n
     return int_buff
 
 # Function for returning detection information
@@ -179,9 +187,6 @@ def set_led_values(n, half_length, centers):
             if 0 < i < led_num:
                 led_vals[i] = 1
     return led_vals
-
-
-
 
 # Define and parse input arguments
 parser = argparse.ArgumentParser()
@@ -261,10 +266,12 @@ cell_height = 3
 led_num = 100
 led_values = [0] * led_num
 led_to_light_half = 8
+led_brightness = 0
 led_strip = neopixel.NeoPixel(board.D18, led_num, auto_write=False)
 
 # Set up buzzer
 buzzer_pin = 23
+buzzer_volume = 0
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(buzzer_pin, GPIO.OUT)
 buzzer_pwm = GPIO.PWM(buzzer_pin, 1000)  # 1000 Hz frequency
@@ -277,11 +284,13 @@ previous_centers_y = []
 stop_threads = False
 
 # Create and start gratification thread
-gratification_thread = threading.Thread(target=gratification_thread_function)
+event = threading.Event()
+gratification_update = False
+gratification_thread = threading.Thread(target=gratification_thread_function, args=(event,))
 gratification_thread.start()
 
 # Set up Serial connection
-stm32 = serial.Serial(port='/dev/ttyACM0', baudrate=1152000, bytesize=8, parity='N', stopbits=1, timeout=1)
+stm32 = serial.Serial(port='/dev/ttyACM0', baudrate=2222222, bytesize=8, parity='N', stopbits=1, timeout=.1)
 stm32.flush()
 time.sleep(3)
 print("start")
@@ -290,10 +299,14 @@ print("start")
 while True:
     try:
         start_time = time.time()
-        # Read data from serial port
+        # Read data from serial ports
         rcv_list = read_uart_data(stm32)
 
-        if len(rcv_list) == row_num * col_num:
+        if len(rcv_list) == row_num * col_num + 2:
+            buzzer_volume = rcv_list[-1]
+            led_brightness = rcv_list[-2]
+            print(f"Brightness: {led_brightness}")
+            rcv_list = rcv_list[:-2]
             split_list = list(split(rcv_list, row_num))
 
             # Create an image from the data
@@ -323,6 +336,8 @@ while True:
             print_objects_centers(current_detections)
             centers_y = get_centers_y(current_detections)
             led_values = set_led_values(led_num, led_to_light_half, centers_y)
+            # gratification_update = True
+            event.set()
 
             # End time after detection
             end_time = time.time()
@@ -341,6 +356,7 @@ while True:
             cv2.destroyAllWindows()
         print("Program terminated")
         stop_threads = True
+        event.set()
         gratification_thread.join()
         buzzer_pwm.stop()
         GPIO.cleanup()
