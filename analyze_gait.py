@@ -23,9 +23,9 @@ import colorsys
 import time
 import board
 import neopixel_spi as neopixel
+import rpi_hardware_pwm
 import random
 import threading
-import RPi.GPIO as GPIO
 
 from tflite_runtime.interpreter import Interpreter
 
@@ -60,8 +60,6 @@ def led_turn_on(brightness):
     for led in range(led_num):
         if led_values[led] == 1:
             led_strip[led] = (0, brightness*2, 0)
-            # led_strip[led] = (0, 10, 0)
-            # print(f"bri: {brightness}")
         else:
             led_strip[led] = (0, 0, 0)
     led_strip.show()
@@ -85,7 +83,7 @@ def set_volume(duty_cycle):
         duty_cycle = 100
     elif duty_cycle < 0:
         duty_cycle = 0
-    buzzer_pwm.ChangeDutyCycle(duty_cycle)
+    buzzer_pwm.change_duty_cycle(duty_cycle)
 
 # Function for generating sound if new step is detected
 def buzzer_update(centers):
@@ -100,16 +98,11 @@ def buzzer_update(centers):
 
 # Function for LED strip thread
 def gratification_thread_function(e):
-    # global gratification_update
     while not stop_threads:
-        # if gratification_update:
         e.wait()
         led_update(current_detections)
-        # buzzer_update(centers_y)
+        buzzer_update(centers_y)
         e.clear()
-            # gratification_update = False
-            # print(f"LED: {led_brightness}, Buzzer: {buzzer_volume}")
-        # time.sleep(0.1)  # Adjust the delay as necessary
     led_turn_off()
     set_volume(0)
 
@@ -269,7 +262,9 @@ led_to_light_half = 8
 led_brightness = 0
 led_strip = neopixel.NeoPixel_SPI(board.SPI(), led_num, auto_write=False)
 
-# # Set up buzzer
+# Set up buzzer
+buzzer_pwm= rpi_hardware_pwm.HardwarePWM(pwm_channel=2, hz=60, chip=2) # PWM on GPIO18
+buzzer_pwm.start(0)
 # buzzer_pin = 23
 # buzzer_volume = 0
 # GPIO.setmode(GPIO.BCM)
@@ -285,7 +280,6 @@ stop_threads = False
 
 # Create and start gratification thread
 event = threading.Event()
-gratification_update = False
 gratification_thread = threading.Thread(target=gratification_thread_function, args=(event,))
 gratification_thread.start()
 
@@ -336,7 +330,6 @@ while True:
             print_objects_centers(current_detections)
             centers_y = get_centers_y(current_detections)
             led_values = set_led_values(led_num, led_to_light_half, centers_y)
-            # gratification_update = True
             event.set()
 
             # End time after detection
@@ -357,7 +350,6 @@ while True:
         print("Program terminated")
         stop_threads = True
         event.set()
-        gratification_thread.join()
         buzzer_pwm.stop()
-        GPIO.cleanup()
+        gratification_thread.join()
         sys.exit()

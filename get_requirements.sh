@@ -41,3 +41,6 @@ pip install pyserial
 # Get neopixel-spi
 pip install rpi_ws281x
 pip install adafruit-circuitpython-neopixel-spi
+
+# Get rpi_hardware_pwm
+pip install rpi-hardware-pwm
