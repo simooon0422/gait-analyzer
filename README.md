@@ -6,7 +6,7 @@ This repository contains code for my Master's thesis "Prototype of dynamometric 
 You can find code for the STM32 part here: https://github.com/simooon0422/gait-data-collector
 ## Installation
 
-This code is meant to run on Raspberry Pi 5 and it is compatible with Python versions 3.7-3.9. Raspberry Pi 5 by default uses Python 3.11 so you have to install another version first.
+This code is meant to run on Raspberry Pi 5 and it is compatible with Python version 3.9. Raspberry Pi 5 by default uses Python 3.11 so you have to install another version first.
 
 Update system
 ```bash
@@ -17,18 +17,18 @@ Update system
 Download alternate version of Python
 ```bash
     cd /usr/src
-    sudo wget https://www.python.org/ftp/python/3.7.3/Python-3.7.3.tgz
-    sudo tar xzf Python-3.7.3.tgz
+    sudo wget https://www.python.org/ftp/python/3.9.0/Python-3.9.0.tgz
+    sudo tar xzf Python-3.9.0.tgz
 ```
 Build it
 ```bash
-    cd Python-3.7.3
+    cd Python-3.9.0
     sudo ./configure --enable-optimizations
     sudo make altinstall
 ```
 Nextly, you need to download virtualenv for this version
 ```bash
-    sudo pip3.7 install virtualenv
+    sudo pip3.9 install virtualenv
 ```
 Then select a directory to place the project and download repository there
 ```bash
@@ -38,7 +38,7 @@ Then select a directory to place the project and download repository there
 ```
 After that, create new virtualn environment using previously installed Python and activate it
 ```bash
-    virtualenv -p /usr/local/bin/python3.7 venv
+    virtualenv -p /usr/local/bin/python3.9 venv
     source venv/bin/activate
 ```
 Lastly, run script to download necessary libraries
@@ -47,10 +47,10 @@ Lastly, run script to download necessary libraries
 ```
 Now you can run the program
 ```bash
-    sudo -E env PATH=$PATH python3 analyze_gait.py --modeldir=feet_model
+    sudo -E env PATH=$PATH python analyze_gait.py --modeldir=feet_model
 ```
 or alternatively, if you wish to also display created pressure map on your screen
 ```bash
-    sudo -E env PATH=$PATH python3 analyze_gait.py --modeldir=feet_model --display==True
+    sudo -E env PATH=$PATH python analyze_gait.py --modeldir=feet_model --display==True
 ```
 Remember that it needs to be connected to microcontroller with correct setup to work properly

@@ -1,10 +1,10 @@
-######## Webcam Object Detection Using Tensorflow-trained Classifier #########
+######## Gait Analyzer #########
 #
 # Author: Szymon Hudziak
 # Date: 11/17/24
 # Description:
 # This program performs gait analysis based on TensorFlow Lite object detection model.
-# Detection is performed on pressure map gotten from the STM32 microcontroller via serial communiaction
+# Detection is performed on pressure map gotten from the STM32 microcontroller via serial communication
 # In case of correct gait detection, program lights up LED strip and generate sound from a buzzer
 # The detection part of the code is based off the EdjeElectronics program at:
 # https://github.com/EdjeElectronics/TensorFlow-Lite-Object-Detection-on-Android-and-Raspberry-Pi/blob/master/TFLite_detection_image.py
@@ -23,7 +23,7 @@ import colorsys
 import time
 import board
 import neopixel_spi as neopixel
-import rpi_hardware_pwm
+import RPi.GPIO as GPIO
 import random
 import threading
 
@@ -83,7 +83,7 @@ def set_volume(duty_cycle):
         duty_cycle = 100
     elif duty_cycle < 0:
         duty_cycle = 0
-    buzzer_pwm.change_duty_cycle(duty_cycle)
+    buzzer_pwm.ChangeDutyCycle(duty_cycle)
 
 # Function for generating sound if new step is detected
 def buzzer_update(centers):
@@ -263,14 +263,12 @@ led_brightness = 0
 led_strip = neopixel.NeoPixel_SPI(board.SPI(), led_num, auto_write=False)
 
 # Set up buzzer
-buzzer_pwm= rpi_hardware_pwm.HardwarePWM(pwm_channel=2, hz=60, chip=2) # PWM on GPIO18
-buzzer_pwm.start(0)
-# buzzer_pin = 23
-# buzzer_volume = 0
-# GPIO.setmode(GPIO.BCM)
-# GPIO.setup(buzzer_pin, GPIO.OUT)
-# buzzer_pwm = GPIO.PWM(buzzer_pin, 1000)  # 1000 Hz frequency
-# buzzer_pwm.start(0)  # Start PWM with 0% duty cycle
+buzzer_pin = 23
+buzzer_volume = 0
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(buzzer_pin, GPIO.OUT)
+buzzer_pwm = GPIO.PWM(buzzer_pin, 1000)  # 1000 Hz frequency
+buzzer_pwm.start(0)  # Start PWM with 0% duty cycle
 
 # Global variables to hold current detections and y coordinate of detections
 current_detections = []
