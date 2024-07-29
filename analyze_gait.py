@@ -19,6 +19,7 @@ import glob
 import importlib.util
 
 import serial
+import spidev
 import colorsys
 import time
 import board
@@ -57,6 +58,10 @@ def create_pressure_map(pressure_values, rows, cols, w, h):
 
 # Function for turning LED strip on
 def led_turn_on(brightness):
+    if brightness > 5:
+        brightness = 5
+    elif brightness < 0:
+        brightness = 0
     for led in range(led_num):
         if led_values[led] == 1:
             led_strip[led] = (0, brightness*2, 0)
@@ -181,6 +186,24 @@ def set_led_values(n, half_length, centers):
                 led_vals[i] = 1
     return led_vals
 
+def send_command(command):
+    spi.xfer2([command])
+
+def read_spi_data(size, command):
+    send_command(command)
+    data_list = []
+    s_time = time.time()
+    raw_data = spi.xfer3([0] * size)
+    e_time = time.time()
+    transfer_time = e_time - s_time
+    print(f"Transfer time: {transfer_time:.4f} seconds")
+
+    data_list.append(raw_data)
+    extracted_data = data_list[0]
+
+    return extracted_data
+
+
 # Define and parse input arguments
 parser = argparse.ArgumentParser()
 parser.add_argument('--modeldir', help='Folder the .tflite file is located in',
@@ -281,25 +304,41 @@ event = threading.Event()
 gratification_thread = threading.Thread(target=gratification_thread_function, args=(event,))
 gratification_thread.start()
 
+# Initialize SPI
+SPI_CMD_SEND_DATA = 0x01
+SPI_BUFFER_SIZE = row_num * col_num + 2 # Size of pressure data + brightness + volume
+spi = spidev.SpiDev()
+spi.open(1, 2)  # Open SPI on bus 0, device (CS) 0
+spi.max_speed_hz = 10000000  # Set SPI speed
+spi.mode = 0b00
+
 # Set up Serial connection
-stm32 = serial.Serial(port='/dev/ttyACM0', baudrate=2222222, bytesize=8, parity='N', stopbits=1, timeout=.1)
-stm32.flush()
-time.sleep(3)
-print("start")
+# stm32 = serial.Serial(port='/dev/ttyACM0', baudrate=2222222, bytesize=8, parity='N', stopbits=1, timeout=.1)
+# stm32.flush()
+# time.sleep(3)
+# print("start")
 
 # Infinite loop to analyze gait
 while True:
     try:
         start_time = time.time()
         # Read data from serial ports
-        rcv_list = read_uart_data(stm32)
+        # rcv_list = read_uart_data(stm32)
+        rcv_list = read_spi_data(SPI_BUFFER_SIZE, SPI_CMD_SEND_DATA)
+        print(f"Received first 10: {rcv_list[:10]}")
+        print(f"Data length: {len(rcv_list)}")
+        # time.sleep(1)
 
-        if len(rcv_list) == row_num * col_num + 2:
+        if len(rcv_list) == row_num * col_num + 2: # Size of pressure matrix + brightness + volume
             buzzer_volume = rcv_list[-1]
             led_brightness = rcv_list[-2]
-            print(f"Brightness: {led_brightness}")
+            print(f"Brightness: {led_brightness}, Volume: {buzzer_volume}")
             rcv_list = rcv_list[:-2]
             split_list = list(split(rcv_list, row_num))
+            # buzzer_volume = 3
+            # led_brightness = 2
+            # print(f"Brightness: {led_brightness}")
+            # split_list = list(split(rcv_list, row_num))
 
             # Create an image from the data
             image = create_pressure_map(split_list, row_num, col_num, cell_width, cell_height)
@@ -350,4 +389,5 @@ while True:
         event.set()
         buzzer_pwm.stop()
         gratification_thread.join()
+        spi.close()
         sys.exit()

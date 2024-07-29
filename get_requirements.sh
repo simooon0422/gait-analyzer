@@ -17,6 +17,9 @@ pip install https://github.com/google-coral/pycoral/releases/download/v2.0.0/tfl
 # Get PySerial
 pip install pyserial
 
+# Get SPI library
+pip install spidev
+
 # Get neopixel-spi
 pip install rpi_ws281x
 pip install adafruit-circuitpython-neopixel-spi
@@ -24,4 +27,5 @@ pip install adafruit-circuitpython-neopixel-spi
 # Get gpio library
 pip install rpi-lgpio
 
+# Get correct version of numpy
 pip install numpy==1.21.6
