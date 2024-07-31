@@ -1,10 +1,10 @@
 ######## Gait Analyzer #########
 #
 # Author: Szymon Hudziak
-# Date: 11/17/24
+# Date: 31/07/24
 # Description:
 # This program performs gait analysis based on TensorFlow Lite object detection model.
-# Detection is performed on pressure map gotten from the STM32 microcontroller via serial communication
+# Detection is performed on pressure map gotten from the STM32 microcontroller via SPI communication
 # In case of correct gait detection, program lights up LED strip and generate sound from a buzzer
 # The detection part of the code is based off the EdjeElectronics program at:
 # https://github.com/EdjeElectronics/TensorFlow-Lite-Object-Detection-on-Android-and-Raspberry-Pi/blob/master/TFLite_detection_image.py
@@ -97,7 +97,7 @@ def buzzer_update(centers):
         for center in centers:
             if not any(previous_center - 10 <= center <= previous_center + 10 for previous_center in previous_centers_y):
                 set_volume(buzzer_volume*20)
-                time.sleep(0.2)
+                time.sleep(0.1)
                 set_volume(0)
     previous_centers_y = centers
 
@@ -278,7 +278,7 @@ col_num = 56
 cell_width = 3
 cell_height = 3
 
-# Create NeoPixel object for LED strip
+# Set up Neopixel LED strip
 led_num = 100
 led_values = [0] * led_num
 led_to_light_half = 8
@@ -290,8 +290,13 @@ buzzer_pin = 23
 buzzer_volume = 0
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(buzzer_pin, GPIO.OUT)
-buzzer_pwm = GPIO.PWM(buzzer_pin, 1000)  # 1000 Hz frequency
+buzzer_pwm = GPIO.PWM(buzzer_pin, 10000)  # 10000 Hz frequency
 buzzer_pwm.start(0)  # Start PWM with 0% duty cycle
+
+# Set up LED on cover
+led_pin = 24
+GPIO.setup(led_pin, GPIO.OUT)
+GPIO.output(led_pin, GPIO.LOW)
 
 # Global variables to hold current detections and y coordinate of detections
 current_detections = []
@@ -304,41 +309,33 @@ event = threading.Event()
 gratification_thread = threading.Thread(target=gratification_thread_function, args=(event,))
 gratification_thread.start()
 
-# Initialize SPI
+# Set up SPI
 SPI_CMD_SEND_DATA = 0x01
-SPI_BUFFER_SIZE = row_num * col_num + 2 # Size of pressure data + brightness + volume
+SPI_BUFFER_SIZE = row_num * col_num + 3 # Size of pressure data + brightness + volume + checksum
 spi = spidev.SpiDev()
 spi.open(1, 2)  # Open SPI on bus 0, device (CS) 0
 spi.max_speed_hz = 10000000  # Set SPI speed
 spi.mode = 0b00
 
-# Set up Serial connection
-# stm32 = serial.Serial(port='/dev/ttyACM0', baudrate=2222222, bytesize=8, parity='N', stopbits=1, timeout=.1)
-# stm32.flush()
-# time.sleep(3)
-# print("start")
-
 # Infinite loop to analyze gait
 while True:
     try:
         start_time = time.time()
-        # Read data from serial ports
-        # rcv_list = read_uart_data(stm32)
+        # Read data SPI
         rcv_list = read_spi_data(SPI_BUFFER_SIZE, SPI_CMD_SEND_DATA)
-        print(f"Received first 10: {rcv_list[:10]}")
+        print(f"Received last 10: {rcv_list[-10:]}")
         print(f"Data length: {len(rcv_list)}")
+        received_mark = rcv_list[SPI_BUFFER_SIZE-1]
+        # print(f"Received mark: {received_mark}")
         # time.sleep(1)
 
-        if len(rcv_list) == row_num * col_num + 2: # Size of pressure matrix + brightness + volume
-            buzzer_volume = rcv_list[-1]
-            led_brightness = rcv_list[-2]
+        if received_mark == 100:
+            GPIO.output(led_pin, GPIO.HIGH)
+            buzzer_volume = rcv_list[-2]
+            led_brightness = rcv_list[-3]
             print(f"Brightness: {led_brightness}, Volume: {buzzer_volume}")
-            rcv_list = rcv_list[:-2]
+            rcv_list = rcv_list[:-3]
             split_list = list(split(rcv_list, row_num))
-            # buzzer_volume = 3
-            # led_brightness = 2
-            # print(f"Brightness: {led_brightness}")
-            # split_list = list(split(rcv_list, row_num))
 
             # Create an image from the data
             image = create_pressure_map(split_list, row_num, col_num, cell_width, cell_height)
@@ -380,6 +377,9 @@ while True:
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     cv2.destroyAllWindows()
                     break
+        else:
+            GPIO.output(led_pin, GPIO.LOW)
+            time.sleep(0.1)
 
     except KeyboardInterrupt:
         if display:
@@ -388,6 +388,7 @@ while True:
         stop_threads = True
         event.set()
         buzzer_pwm.stop()
+        GPIO.output(led_pin, GPIO.LOW)
         gratification_thread.join()
         spi.close()
         sys.exit()
